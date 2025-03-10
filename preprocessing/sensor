@@ -1,0 +1,63 @@
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.impute import SimpleImputer
+
+# Load raw sensor data
+input_path = 'data/raw.txt'
+output_path = 'data/cleaned_raw.txt'
+
+# Pre-process the file to handle irregular lines
+with open(input_path, 'r') as infile, open(output_path, 'w') as outfile:
+    for line in infile:
+        fields = line.strip().split(',')
+        if len(fields) == 6:
+            outfile.write(line)
+
+# Read cleaned data
+df = pd.read_csv(output_path, sep=',', header=None, names=['user', 'activity', 'timestamp', 'x', 'y', 'z'])
+df['z'] = df['z'].str.replace(';', '', regex=False).astype(float)
+
+# Filter data to keep only the desired activities
+valid_activities = ['Jogging', 'Walking', 'Standing', 'Sitting']
+df = df[df['activity'].isin(valid_activities)]
+
+le = LabelEncoder()
+df['activity_label'] = le.fit_transform(df['activity'])
+
+# Standardize the sensor data
+scaler = StandardScaler()
+df[['x', 'y', 'z']] = scaler.fit_transform(df[['x', 'y', 'z']])
+
+# Create sliding windows
+window_size = 50
+windows = []
+labels = []
+for i in range(0, len(df) - window_size, window_size // 2):
+    window = df.iloc[i:i + window_size]
+    xyz = window[['x', 'y', 'z']].values
+    windows.append(xyz) # Use xyz directly (3 features)
+    labels.append(window['activity_label'].mode()[0])
+
+X = np.array(windows)
+y = np.array(labels)
+
+# Impute missing values
+imputer = SimpleImputer(strategy='mean')
+X_imputed = imputer.fit_transform(X.reshape(X.shape[0], -1))
+
+# Verify the shape of X_imputed
+print("Shape of X_imputed:", X_imputed.shape)
+
+# Calculate the correct reshape dimensions
+n_samples = X_imputed.shape[0]
+n_features = 3
+correct_window_size = int(X_imputed.shape[1] / n_features)
+print("Calculated window size:", correct_window_size)
+
+# Reshape back to 3D for training
+X_final = X_imputed.reshape(n_samples, correct_window_size, n_features)  
+
+# Save preprocessed data
+np.save('preprocessing/sensor_data.npy', X_final) 
+np.save('preprocessing/sensor_labels.npy', y)

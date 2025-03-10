@@ -1,0 +1,92 @@
+import numpy as np
+import pickle
+from tensorflow.keras.models import load_model
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Bước 1: Tải dữ liệu và mô hình đã lưu
+with open('smoothed_processed_data.pkl', 'rb') as f:
+    X_train_smoothed, X_test_smoothed, y_train, y_test, label_encoder = pickle.load(f)
+
+# Tải mô hình đã huấn luyện
+model = load_model('lstm_model.h5')
+
+# Bước 2: Dự đoán trên tập kiểm tra
+y_pred_prob = model.predict(X_test_smoothed)
+y_pred = np.argmax(y_pred_prob, axis=1)
+
+# Bước 3: Chuyển đổi nhãn về dạng ban đầu
+y_true_labels = label_encoder.inverse_transform(y_test)
+y_pred_labels = label_encoder.inverse_transform(y_pred)
+class_names = label_encoder.classes_
+
+# Bước 4: Tính toán các chỉ số đánh giá
+
+# Độ chính xác
+accuracy = accuracy_score(y_test, y_pred)
+print(f"Độ chính xác trên tập kiểm tra: {accuracy:.4f}")
+
+# Báo cáo phân loại
+print("\nBáo cáo phân loại:")
+print(classification_report(y_test, y_pred, target_names=class_names))
+
+# Ma trận nhầm lẫn
+cm = confusion_matrix(y_test, y_pred)
+
+# Bước 5: Trực quan hóa ma trận nhầm lẫn
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=class_names, yticklabels=class_names)
+plt.xlabel('Nhãn dự đoán')
+plt.ylabel('Nhãn thực')
+plt.title('Ma trận nhầm lẫn')
+plt.show()
+
+# Bước 6: Vẽ đồ thị loss và accuracy trong quá trình huấn luyện (nếu có lịch sử)
+try:
+    # Nếu bạn đã lưu history khi huấn luyện mô hình
+    import matplotlib.pyplot as plt
+
+    # Giả sử bạn đã lưu history vào file 'history.pkl'
+    with open('history.pkl', 'rb') as f:
+        history = pickle.load(f)
+
+    # Vẽ loss
+    plt.figure(figsize=(12, 6))
+    plt.plot(history['loss'], label='Loss trên tập huấn luyện')
+    plt.plot(history['val_loss'], label='Loss trên tập kiểm tra')
+    plt.title('Biểu đồ Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.show()
+
+    # Vẽ accuracy
+    plt.figure(figsize=(12, 6))
+    plt.plot(history['accuracy'], label='Accuracy trên tập huấn luyện')
+    plt.plot(history['val_accuracy'], label='Accuracy trên tập kiểm tra')
+    plt.title('Biểu đồ Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.show()
+except:
+    print("Không tìm thấy lịch sử huấn luyện để vẽ biểu đồ.")
+
+# Bước 7: Trực quan hóa kết quả dự đoán cho một số mẫu ngẫu nhiên
+num_samples = 3  # Số mẫu muốn hiển thị
+indices = np.random.choice(len(X_test_smoothed), num_samples, replace=False)
+
+for idx in indices:
+    window = X_test_smoothed[idx]
+    true_label = y_true_labels[idx]
+    pred_label = y_pred_labels[idx]
+    
+    plt.figure(figsize=(12, 6))
+    for i in range(window.shape[1]):
+        plt.plot(window[:, i], label=f'Đặc trưng {i+1}')
+    plt.title(f'Mẫu {idx}: Nhãn thực - {true_label}, Nhãn dự đoán - {pred_label}')
+    plt.xlabel('Thời gian')
+    plt.ylabel('Giá trị')
+    plt.legend()
+    plt.show()

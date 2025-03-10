@@ -1,0 +1,26 @@
+import tensorflow as tf
+
+from tensorflow.keras.models import load_model
+
+model = load_model('lstm_model.h5')
+
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
+
+# Cho phép sử dụng Select TensorFlow Ops
+converter.target_spec.supported_ops = [
+    tf.lite.OpsSet.TFLITE_BUILTINS,  # Toán tử cơ bản của TFLite
+    tf.lite.OpsSet.SELECT_TF_OPS     # Toán tử TensorFlow bổ sung
+]
+
+# Vô hiệu hóa _experimental_lower_tensor_list_ops
+converter._experimental_lower_tensor_list_ops = False
+
+# Bật experimental_enable_resource_variables nếu cần
+converter.experimental_enable_resource_variables = True
+
+# Thực hiện chuyển đổi
+tflite_model = converter.convert()
+
+# Lưu file .tflite
+with open('lstm_model.tflite', 'wb') as f:
+    f.write(tflite_model)

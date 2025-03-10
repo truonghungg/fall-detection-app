@@ -1,0 +1,67 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import pickle
+
+# Load the preprocessed data
+with open('preprocessing/smoothed_processed_data.pkl', 'rb') as f:
+    X_train_smoothed, X_test_smoothed, y_train, y_test, label_encoder = pickle.load(f)
+
+
+def plot_sensor_values(X, y, label_encoder, action_label):
+    action_indices = np.where(y == label_encoder.transform([action_label])[0])[0]
+
+    if len(action_indices) == 0:
+        print(f"No windows found for action: {action_label}")
+        return
+
+    sample_idx = np.random.choice(action_indices)
+    
+    fig, axs = plt.subplots(2, 3, figsize=(15, 10))
+    fig.suptitle(f'Sensor Values for {action_label} Action', fontsize=16)
+    
+    # Sensor names
+    sensor_names = ['AccelX', 'AccelY', 'AccelZ', 'GyroX', 'GyroY', 'GyroZ']
+    
+    # Flatten axs for easy iteration
+    axs_flat = axs.flatten()
+    
+    # Plot each sensor's data
+    for i, sensor_name in enumerate(sensor_names):
+        # Original data
+        original_data = X[sample_idx][:, i]
+        
+        axs_flat[i].plot(original_data, label='Smoothed Data')
+        axs_flat[i].set_title(f'{sensor_name} Sensor')
+        axs_flat[i].set_xlabel('Time Steps')
+        axs_flat[i].set_ylabel('Normalized Value')
+        axs_flat[i].legend()
+    
+    plt.tight_layout()
+    plt.show()
+
+# Get unique action labels
+unique_actions = label_encoder.classes_
+
+# Plot sensor values for each unique action
+for action in unique_actions:
+    plot_sensor_values(X_train_smoothed, y_train, label_encoder, action)
+
+# Additionally, create a summary of sensor statistics for each action
+def print_sensor_stats(X, y, label_encoder):
+    print("\nSensor Statistics by Action:")
+    for action in label_encoder.classes_:
+        action_indices = np.where(y == label_encoder.transform([action])[0])[0]
+        action_windows = X[action_indices]
+        
+        print(f"\n{action} Action:")
+        sensor_names = ['AccelX', 'AccelY', 'AccelZ', 'GyroX', 'GyroY', 'GyroZ']
+        
+        for i, sensor in enumerate(sensor_names):
+            sensor_data = action_windows[:, :, i]
+            print(f"{sensor} - Mean: {sensor_data.mean():.4f}, "
+                  f"Std: {sensor_data.std():.4f}, "
+                  f"Min: {sensor_data.min():.4f}, "
+                  f"Max: {sensor_data.max():.4f}")
+
+# Print sensor statistics
+print_sensor_stats(X_train_smoothed, y_train, label_encoder)

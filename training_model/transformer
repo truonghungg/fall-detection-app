@@ -1,0 +1,71 @@
+import tensorflow as tf
+from tensorflow.keras.layers import Input, Dense, MultiHeadAttention, LayerNormalization, Dropout, GlobalAveragePooling1D
+from tensorflow.keras.models import Model
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+import numpy as np
+def transformer_encoder(inputs, head_size, num_heads, ff_dim, dropout=0):
+    # Multi-Head Attention
+    x = LayerNormalization(epsilon=1e-6)(inputs)
+    x = MultiHeadAttention(num_heads=num_heads, key_dim=head_size, dropout=dropout)(x, x)
+    x = Dropout(dropout)(x)
+    res = x + inputs
+
+    # Feed-Forward Network
+    x = LayerNormalization(epsilon=1e-6)(res)
+    x = Dense(ff_dim, activation="relu")(x)
+    x = Dropout(dropout)(x)
+    x = Dense(inputs.shape[-1])(x)
+    return x + res
+def build_transformer_model(input_shape, num_classes, head_size=64, num_heads=4, ff_dim=128, num_transformer_blocks=4, dropout=0.3):
+    inputs = Input(shape=input_shape)
+    x = inputs
+    
+    # Thêm các lớp Transformer
+    for _ in range(num_transformer_blocks):
+        x = transformer_encoder(x, head_size, num_heads, ff_dim, dropout)
+    
+    # Global Average Pooling và lớp đầu ra
+    x = GlobalAveragePooling1D()(x)
+    outputs = Dense(num_classes, activation="softmax")(x)
+    
+    model = Model(inputs, outputs)
+    return model
+# Load dữ liệu đã tiền xử lý
+X_train = np.load('preprocessing/actual_data/sensor_data.npy')
+y_train = np.load('preprocessing/actual_data/sensor_labels.npy')
+
+# Reshape dữ liệu để phù hợp với đầu vào của Transformer
+X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)  # Thêm chiều thứ 3
+input_shape = (X_train.shape[1], X_train.shape[2])  # (số timesteps, số features)
+num_classes = len(np.unique(y_train))  # Số lượng lớp
+
+model = build_transformer_model(
+    input_shape=input_shape,
+    num_classes=num_classes,
+    head_size=64,
+    num_heads=4,
+    ff_dim=128,
+    num_transformer_blocks=4,
+    dropout=0.3
+)
+
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+model.summary()
+
+# Callbacks
+early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)
+
+# Huấn luyện
+history = model.fit(
+    X_train, y_train,
+    epochs=50,
+    batch_size=32,
+    validation_data=(X_train, y_train),
+    callbacks=[early_stop, reduce_lr]
+)

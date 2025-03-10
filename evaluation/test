@@ -1,0 +1,41 @@
+import numpy as np
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+import tensorflow as tf
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Load the trained model
+model = tf.keras.models.load_model('training_model/sensor_only_model.keras')
+
+# Load the test data
+X_sensor_test = np.load('preprocessing/sensor_data.npy')
+y_sensor_test = np.load('preprocessing/sensor_labels.npy')
+
+# Ensure both datasets have the same number of samples
+num_samples = min(X_sensor_test.shape[0], y_sensor_test.shape[0])
+X_sensor_test = X_sensor_test[:num_samples]
+y_sensor_test = y_sensor_test[:num_samples]
+
+# Make predictions
+y_pred = np.argmax(model.predict(X_sensor_test), axis=1)
+
+# Calculate evaluation metrics
+accuracy = accuracy_score(y_sensor_test, y_pred)
+precision = precision_score(y_sensor_test, y_pred, average='weighted')
+recall = recall_score(y_sensor_test, y_pred, average='weighted')
+f1 = f1_score(y_sensor_test, y_pred, average='weighted')
+conf_matrix = confusion_matrix(y_sensor_test, y_pred)
+
+print(f"Accuracy: {accuracy:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall: {recall:.4f}")
+print(f"F1-Score: {f1:.4f}")
+print("Confusion Matrix:")
+print(conf_matrix)
+
+# Visualize confusion matrix
+sns.heatmap(conf_matrix, annot=True, fmt='d', xticklabels=["Jogging", "Walking", "Standing", "Sitting"], yticklabels=["Jogging", "Walking", "Standing", "Sitting", "Falling"])
+plt.xlabel('Dự đoán')
+plt.ylabel('Thực tế')
+plt.title('Confusion Matrix')
+plt.show()
