@@ -1,63 +1,176 @@
-import numpy as np
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.impute import SimpleImputer
+import numpy as np
+from scipy import stats, fft
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
+from sklearn.model_selection import train_test_split
+from imblearn.over_sampling import RandomOverSampler
+import pickle
+import os
+from scipy.interpolate import interp1d
 
-# Load raw sensor data
-input_path = 'data/raw.txt'
-output_path = 'data/cleaned_raw.txt'
+def load_and_preprocess_data(file_path='data/dataset.csv', window_size=100, step=50):
+    """Load and preprocess data in one function"""
+    
+    # 1. Load data
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File {file_path} does not exist!")
+    df = pd.read_csv(file_path)
+    
+    # 2. Basic preprocessing
+    df = df.dropna().drop_duplicates()
+    sensor_cols = ['AccelX', 'AccelY', 'AccelZ', 'GyroX', 'GyroY', 'GyroZ']  # Chỉ lấy 6 đặc trưng MPU6050
+    
+    # 3. Remove outliers and apply smoothing
+    z_scores = np.abs(stats.zscore(df[sensor_cols]))
+    df = df[(z_scores < 3).all(axis=1)]
+    for col in sensor_cols:
+        df[col] = df[col].rolling(window=3, min_periods=1, center=True).mean()
+    
+    # 4. Normalize data (chỉ trên 6 đặc trưng MPU6050)
+    scaler = MinMaxScaler()
+    df[sensor_cols] = scaler.fit_transform(df[sensor_cols])
+    with open('scaler.pkl', 'wb') as f:
+        pickle.dump(scaler, f)
+    
+    # 5. Create windows
+    windows, labels = [], []
+    for i in range(0, len(df) - window_size + 1, step):
+        window = df.iloc[i:i + window_size]
+        if len(window['ActivityLabel'].unique()) == 1:  # Chỉ giữ cửa sổ thuần nhất
+            windows.append(window[sensor_cols].values)  # Chỉ lấy 6 cột cảm biến
+            labels.append(window['ActivityLabel'].iloc[0])
+    
+    X = np.array(windows)
+    y = np.array(labels)
+    
+    # 6. Add features (chỉ trên 6 đặc trưng MPU6050)
+    X = add_features(X)
+    
+    # 7. Balance classes using RandomOverSampler
+    X_reshaped = X.reshape(X.shape[0], -1)
+    ros = RandomOverSampler(random_state=42)
+    X_balanced, y_balanced = ros.fit_resample(X_reshaped, y)
+    X = X_balanced.reshape(-1, window_size, X.shape[2])
+    y = y_balanced
+    
+    # 8. Encode labels (giữ nguyên nhãn gốc)
+    label_encoder = LabelEncoder()
+    y = label_encoder.fit_transform(y)
+    
+    # 9. Split data
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, stratify=y, random_state=42
+    )
+    
+    # 10. Augment training data
+    X_train, y_train = augment_data(X_train, y_train)
+    
+    return X_train, X_test, y_train, y_test, label_encoder
 
-# Pre-process the file to handle irregular lines
-with open(input_path, 'r') as infile, open(output_path, 'w') as outfile:
-    for line in infile:
-        fields = line.strip().split(',')
-        if len(fields) == 6:
-            outfile.write(line)
 
-# Read cleaned data
-df = pd.read_csv(output_path, sep=',', header=None, names=['user', 'activity', 'timestamp', 'x', 'y', 'z'])
-df['z'] = df['z'].str.replace(';', '', regex=False).astype(float)
+def add_features(X):
+    """Add all 14 features including basic sensor data and advanced features"""
+    num_windows, timesteps, num_features = X.shape
+    
+    # 1. Basic 6 sensor features are already in X
+    features = [X]
+    
+    # 2. Calculate magnitudes
+    accel_magnitude = np.sqrt(X[:, :, 0]**2 + X[:, :, 1]**2 + X[:, :, 2]**2)
+    gyro_magnitude = np.sqrt(X[:, :, 3]**2 + X[:, :, 4]**2 + X[:, :, 5]**2)
+    
+    # 3. Calculate FFT features
+    fft_accel_x = np.abs(fft.fft(X[:, :, 0], axis=1))  # FFT of AccelX
+    fft_gyro_x = np.abs(fft.fft(X[:, :, 3], axis=1))   # FFT of GyroX
+    
+    # 4. Estimate step frequency from acceleration magnitude
+    freq_range = np.fft.fftfreq(timesteps)
+    positive_freq_mask = freq_range >= 0
+    fft_accel_mag = np.abs(fft.fft(accel_magnitude, axis=1))
+    fft_accel_mag = fft_accel_mag[:, positive_freq_mask]
+    freq_range = freq_range[positive_freq_mask]
+    
+    walking_mask = (freq_range >= 0.5) & (freq_range <= 3.0)
+    step_freq = np.zeros((num_windows, timesteps))
+    
+    for i in range(num_windows):
+        if np.any(walking_mask):
+            dominant_freq_idx = np.argmax(fft_accel_mag[i, walking_mask])
+            step_freq[i, :] = freq_range[walking_mask][dominant_freq_idx]
+        else:
+            dominant_freq_idx = np.argmax(fft_accel_mag[i])
+            step_freq[i, :] = freq_range[dominant_freq_idx]
+    
+    # 5. Calculate tilt angles
+    tilt_x = np.arctan2(X[:, :, 0], np.sqrt(X[:, :, 1]**2 + X[:, :, 2]**2))
+    tilt_y = np.arctan2(X[:, :, 1], np.sqrt(X[:, :, 0]**2 + X[:, :, 2]**2))
+    
+    # 6. Calculate acceleration variance
+    accel_variance = np.var(X[:, :, :3], axis=2)
+    
+    # Combine all features
+    return np.concatenate([
+        X,                          # Original 6 features
+        accel_magnitude[:, :, np.newaxis],    # Magnitude of acceleration
+        gyro_magnitude[:, :, np.newaxis],     # Magnitude of gyroscope
+        fft_accel_x[:, :, np.newaxis],        # FFT of AccelX
+        fft_gyro_x[:, :, np.newaxis],         # FFT of GyroX
+        step_freq[:, :, np.newaxis],          # Step frequency
+        tilt_x[:, :, np.newaxis],             # Tilt angle X
+        tilt_y[:, :, np.newaxis],             # Tilt angle Y
+        accel_variance[:, :, np.newaxis]      # Acceleration variance
+    ], axis=2)
 
-# Filter data to keep only the desired activities
-valid_activities = ['Jogging', 'Walking', 'Standing', 'Sitting']
-df = df[df['activity'].isin(valid_activities)]
 
-le = LabelEncoder()
-df['activity_label'] = le.fit_transform(df['activity'])
+def augment_data(X, y):
+    """Apply simple data augmentation techniques to increase training data diversity"""
+    X_aug = [X]  # Start with original data
+    y_aug = [y]  # Start with original labels
+    
+    # 1. Add small random noise
+    noise = np.random.normal(0, 0.02, X.shape)  # Small noise with mean=0, std=0.02
+    X_aug.append(X + noise)
+    y_aug.append(y)
+    
+    # 2. Time reversal
+    X_aug.append(X[:, ::-1, :])  # Reverse the time sequence
+    y_aug.append(y)
+    
+    # Combine all augmented data
+    return np.vstack(X_aug), np.concatenate(y_aug)
 
-# Standardize the sensor data
-scaler = StandardScaler()
-df[['x', 'y', 'z']] = scaler.fit_transform(df[['x', 'y', 'z']])
 
-# Create sliding windows
-window_size = 50
-windows = []
-labels = []
-for i in range(0, len(df) - window_size, window_size // 2):
-    window = df.iloc[i:i + window_size]
-    xyz = window[['x', 'y', 'z']].values
-    windows.append(xyz) # Use xyz directly (3 features)
-    labels.append(window['activity_label'].mode()[0])
+def time_warp(X, sigma=0.1):
+    """Apply time warping to the data"""
+    num_windows, timesteps, features = X.shape
+    warped_X = np.zeros_like(X)
+    
+    for i in range(num_windows):
+        orig_steps = np.arange(timesteps)
+        random_warps = np.random.normal(loc=1.0, scale=sigma, size=(timesteps,))
+        warp_steps = np.cumsum(random_warps)
+        warp_steps = (warp_steps - warp_steps[0]) * (timesteps - 1) / (warp_steps[-1] - warp_steps[0])
+        
+        for j in range(features):
+            warper = interp1d(orig_steps, X[i, :, j], bounds_error=False,
+                             fill_value=(X[i, 0, j], X[i, -1, j]))
+            warped_X[i, :, j] = warper(warp_steps)
+    
+    return warped_X
 
-X = np.array(windows)
-y = np.array(labels)
 
-# Impute missing values
-imputer = SimpleImputer(strategy='mean')
-X_imputed = imputer.fit_transform(X.reshape(X.shape[0], -1))
-
-# Verify the shape of X_imputed
-print("Shape of X_imputed:", X_imputed.shape)
-
-# Calculate the correct reshape dimensions
-n_samples = X_imputed.shape[0]
-n_features = 3
-correct_window_size = int(X_imputed.shape[1] / n_features)
-print("Calculated window size:", correct_window_size)
-
-# Reshape back to 3D for training
-X_final = X_imputed.reshape(n_samples, correct_window_size, n_features)  
-
-# Save preprocessed data
-np.save('preprocessing/sensor_data.npy', X_final) 
-np.save('preprocessing/sensor_labels.npy', y)
+if __name__ == "__main__":
+    # Process data
+    X_train, X_test, y_train, y_test, label_encoder = load_and_preprocess_data()
+    
+    # Save processed data
+    os.makedirs('preprocessing', exist_ok=True)
+    with open('preprocessing/processed_data_fixed.pkl', 'wb') as f:
+        pickle.dump((X_train, X_test, y_train, y_test, label_encoder), f)
+    
+    # Print shapes
+    print(f"X_train shape: {X_train.shape}")
+    print(f"X_test shape: {X_test.shape}")
+    print(f"y_train shape: {y_train.shape}")
+    print(f"y_test shape: {y_test.shape}")
+    print(f"Classes: {label_encoder.classes_}")

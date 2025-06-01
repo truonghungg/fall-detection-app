@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: action-recognition
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn test:application
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.0
+      - key: EMAIL_SENDER
+        value: hung0108az@gmail.com
+      - key: EMAIL_PASSWORD
+        value: itkp uaxn afni kdzi
+      - key: EMAIL_RECIPIENT
+        value: hung0108a@gmail.com
+      - key: SMTP_SERVER
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
+      - key: PI_URI
+        value: ws://192.168.100.86:8080 
