@@ -15,24 +15,28 @@ import ssl
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 print(f"TensorFlow version: {tf.__version__}")
 
 # Configuration
-model_path = '/home/your_username/actionrecognition/models/cnn_lstm.h5'  # Update with your PythonAnywhere username
-scaler_path = '/home/your_username/actionrecognition/scaler.pkl'
-data_path = '/home/your_username/actionrecognition/preprocessing/processed_data_fixed.pkl'
+model_path = 'models/cnn_lstm.h5'
+scaler_path = 'scaler.pkl'
+data_path = 'preprocessing/processed_data_fixed.pkl'
 window_size = 100
-pi_uri = "ws://192.168.100.86:8080"  # Update with your Raspberry Pi's public IP
-prediction_interval = 0.2  
+pi_uri = os.getenv('PI_URI', "ws://192.168.100.86:8080")
+prediction_interval = 0.2
 clients = set()
 
 # Email Configuration
-EMAIL_SENDER = 'hung0108az@gmail.com'  
-EMAIL_PASSWORD = 'itkp uaxn afni kdzi'    
-EMAIL_RECIPIENT = 'hung0108a@gmail.com' 
-SMTP_SERVER = 'smtp.gmail.com'
-SMTP_PORT = 587
+EMAIL_SENDER = os.getenv('EMAIL_SENDER', 'hung0108az@gmail.com')
+EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD', 'itkp uaxn afni kdzi')
+EMAIL_RECIPIENT = os.getenv('EMAIL_RECIPIENT', 'hung0108a@gmail.com')
+SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
 
 # Fall detection configuration
 fall_buffer = deque(maxlen=5)  # Lưu 5 dự đoán gần nhất
@@ -236,7 +240,7 @@ async def serve_html(request):
         return web.FileResponse(file_path)
     return web.Response(text="File not found", status=404)
 
-# WSGI Application for PythonAnywhere
+# WSGI Application for Render
 app = web.Application()
 cors = aiohttp_cors.setup(app, defaults={
     "*": aiohttp_cors.ResourceOptions(
@@ -256,7 +260,8 @@ application = app
 
 if __name__ == "__main__":
     try:
-        web.run_app(app, host='0.0.0.0', port=8080)
+        port = int(os.getenv('PORT', 8080))
+        web.run_app(app, host='0.0.0.0', port=port)
     except KeyboardInterrupt:
         print("⏹ Stopped by user")
     except Exception as e:
